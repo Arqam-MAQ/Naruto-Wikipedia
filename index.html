@@ -10,6 +10,11 @@
   <script>try{var t=localStorage.getItem("sa-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
+  <script>
+    (function(){function show(m){var d=document.getElementById("dbg")||document.body.appendChild(Object.assign(document.createElement("pre"),{id:"dbg"}));d.style.cssText="white-space:pre-wrap;background:#300;color:#fdd;padding:12px;margin:0;font:12px monospace;position:relative;z-index:99";d.textContent+=m+"\n";}
+    window.addEventListener("error",function(e){show("ERROR: "+(e.message||"failed to load "+(e.target&&(e.target.src||e.target.href))));},true);
+    window.addEventListener("unhandledrejection",function(e){show("ERROR: "+(e.reason&&e.reason.message||e.reason));});})();
+  </script>
   <a class="skip" href="#main">Skip to content</a>
   <header class="topbar">
     <a class="brand" href="#/" aria-label="SHINOBI ARCHIVE home"><span class="seal" aria-hidden="true">忍</span><span>SHINOBI <b>ARCHIVE</b></span></a>
@@ -28,8 +33,3 @@
     </nav>
     <form class="mini-search" id="miniSearch" role="search" autocomplete="off">
       <input id="miniQ" type="search" placeholder="Search…" aria-label="Search the archive" />
-    </form>
-    <button class="icon-btn" id="themeBtn" aria-label="Toggle light and dark theme">◐</button>
-  </header>
-  <main id="main" tabindex="-1"></main>
-  <footer class="footer">
