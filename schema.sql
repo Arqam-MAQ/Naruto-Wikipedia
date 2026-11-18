@@ -202,6 +202,7 @@ create table movies (
   slug text unique not null,
   title text not null,
   series series_kind not null,
+  release_year int,        -- year is known; exact date stays null until verified
   release_date date,
   summary text,
   timeline_placement text,
