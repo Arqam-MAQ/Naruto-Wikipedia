@@ -1,4 +1,6 @@
-import { collections, bySlug, characters, clans, villages, organizations, jutsu, arcs, latest, SAMPLE_NOTICE } from "./data.js";
+import { collections, bySlug, characters, clans, villages, organizations, jutsu, arcs, movies, seriesInfo, latest, SAMPLE_NOTICE } from "./data.js";
+import { initTools } from "./tools.js";
+import { generate, ELEMENTS, CATEGORIES, THEMES, STYLES, NAMING } from "./generator.js";
 import { search, suggestions, TYPE_LABEL, INDEX } from "./search.js";
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -40,6 +42,7 @@ const cardFor = (type, x) =>
   : type === "villages" ? `<a class="card nation" href="${href(type, x.slug)}"><div class="jp" lang="ja">${esc(x.jp)}</div><h3>${esc(x.name)}</h3><span class="tag">${esc(x.nation)}</span><p>${esc(x.summary)}</p></a>`
   : type === "jutsu" ? simpleCard(type, x, `<span class="pill">${esc(x.category)}</span><span class="pill">Rank ${esc(x.rank)}</span>`)
   : type === "arcs" ? simpleCard(type, x, `<span class="pill">${esc(x.series)}</span>`)
+  : type === "movies" ? simpleCard(type, x, `<span class="pill">${esc(x.series)}</span><span class="pill">${esc(x.year)}</span>`)
   : simpleCard(type, x);
 const sectionHead = (title, type) => `<div class="block-head"><h2>${title}</h2>${type ? `<a href="#/${type}">View all →</a>` : ""}</div>`;
 const sampleNote = `<div class="notice">${esc(SAMPLE_NOTICE)}</div>`;
@@ -69,8 +72,8 @@ function home() {
     <section class="block">${sectionHead("Latest database additions")}<div class="grid">${latest.map((l) => { const x = bySlug(l.type, l.slug); return simpleCard(l.type, x, `<span class="pill">${esc(TYPE_LABEL[l.type] || l.type)}</span>`); }).join("")}</div></section>
     <section class="block"><div class="block-head"><h2>Random character</h2></div><div class="random" id="rand"></div></section>
     <section class="block">${sectionHead("Explore the Naruto universe")}<div class="grid">
-      ${[["characters", "Characters"], ["clans", "Clans"], ["villages", "Villages & map"], ["organizations", "Organizations"], ["teams", "Teams"], ["jutsu", "Jutsu"], ["arcs", "Story arcs"], ["episodes", "Episodes"], ["movies", "Movies"]]
-        .map(([t, l]) => `<a class="card nation" href="#/${t}"><h3>${l}</h3><span class="tag">${(collections[t] || []).length ? (collections[t].length + " sample entries") : "Planned"}</span></a>`).join("")}
+      ${[["characters", "Characters"], ["clans", "Clans"], ["villages", "Villages & map"], ["organizations", "Organizations"], ["teams", "Teams"], ["jutsu", "Jutsu"], ["arcs", "Story arcs"], ["episodes", "Episodes"], ["movies", "Movies"], ["generator", "Jutsu generator"], ["finder", "Finder"], ["tree", "Family tree"], ["compare", "Compare"], ["timeline", "Timeline"], ["quiz", "Quiz"]]
+        .map(([t, l]) => `<a class="card nation" href="#/${t}"><h3>${l}</h3><span class="tag">${(collections[t] || []).length ? (collections[t].length + " sample entries") : (["generator", "finder", "tree", "compare", "timeline", "quiz"].includes(t) ? "Interactive tool" : "Pending data")}</span></a>`).join("")}
     </div></section>
   </div>`;
   const rand = () => {
@@ -127,10 +130,11 @@ function searchPage(params) {
 }
 
 /* ---------- list pages ---------- */
-const TITLES = { characters: "Characters", clans: "Clans", villages: "Villages & Nations", organizations: "Organizations", teams: "Teams & Squads", jutsu: "Jutsu", arcs: "Story Arcs" };
+const TITLES = { characters: "Characters", clans: "Clans", villages: "Villages & Nations", organizations: "Organizations", teams: "Teams & Squads", jutsu: "Jutsu", arcs: "Story Arcs", movies: "Movies" };
 function listPage(type) {
   const all = collections[type];
-  const filterOpts = type === "jutsu" ? [...new Set(all.map((j) => j.category))] : type === "villages" ? ["Great nation", "Minor village"] : [];
+  const vname = (x) => bySlug("villages", x.village)?.name || "";
+  const filterOpts = type === "jutsu" ? [...new Set(all.map((j) => j.category))] : type === "villages" ? ["Great nation", "Minor village"] : (type === "characters" || type === "clans") ? [...new Set(all.map(vname).filter(Boolean))] : [];
   main.innerHTML = `<div class="wrap detail"><h1>${TITLES[type]}</h1>${sampleNote}
     <div class="toolbar"><input id="lf" placeholder="Filter ${TITLES[type].toLowerCase()}…" aria-label="Filter list" />
       ${filterOpts.length ? `<select id="cat" aria-label="Category"><option value="">All</option>${filterOpts.map((o) => `<option>${esc(o)}</option>`).join("")}</select>` : ""}
@@ -139,7 +143,7 @@ function listPage(type) {
   const draw = () => {
     const t = $("#lf").value.toLowerCase(), c = $("#cat")?.value || "", za = $("#so").value === "za";
     let out = all.filter((x) => (x.name + " " + (x.summary || "")).toLowerCase().includes(t))
-      .filter((x) => !c || x.category === c || (c === "Great nation" ? x.great : c === "Minor village" ? !x.great : true));
+      .filter((x) => !c || x.category === c || (type === "villages" ? (c === "Great nation" ? x.great : !x.great) : (type === "characters" || type === "clans") ? vname(x) === c : true));
     out = out.sort((a, b) => a.name.localeCompare(b.name) * (za ? -1 : 1));
     $("#lg").innerHTML = out.map((x) => cardFor(type, x)).join("") || '<p class="empty">Nothing matches that filter.</p>';
   };
@@ -148,38 +152,103 @@ function listPage(type) {
 const worldMap = () => `<div class="map" role="group" aria-label="Schematic world map of hidden villages. Positions are approximate.">${villages.map((v) => `<a class="pin${v.great ? "" : " minor"}" style="left:${v.mapX}%;top:${v.mapY}%" href="${href("villages", v.slug)}"><i></i><span>${esc(v.name)}</span></a>`).join("")}</div><p class="tag">Schematic map — pin positions are approximate and not to scale.</p>`;
 
 /* ---------- detail pages ---------- */
+const NA = '<span class="tag">Not added yet</span>';
+// A person/thing is a link when it is a slug in the dataset, plain text otherwise.
+const person = (v) => (bySlug("characters", v) ? link("characters", v) : `<span>${esc(v)}</span>`);
+const people = (arr) => (arr && arr.length ? arr.map(person).join("") : NA);
+const links = (type, arr) => (arr && arr.length ? arr.map((s) => (bySlug(type, s) ? link(type, s) : `<span>${esc(s)}</span>`)).join("") : NA);
+const kvRows = (pairs) => `<dl class="kv">${pairs.map(([k, v]) => `<dt>${k}</dt><dd>${v || NA}</dd>`).join("")}</dl>`;
+const section = (title, html) => `<section class="sec"><h2>${title}</h2>${html}</section>`;
+const textOrNA = (t) => (t ? `<p>${esc(t)}</p>` : `<p>${NA}</p>`);
+const listOrNA = (a) => (a && a.length ? `<ul>${a.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : `<p>${NA}</p>`);
+
+function characterBody(x, slug, fav) {
+  const v = bySlug("villages", x.village), cn = x.clan && bySlug("clans", x.clan), t = x.team && bySlug("teams", x.team);
+  const ab = x.abil || {}, rel = x.rel || {};
+  const abRows = [["Ninjutsu", ab.ninjutsu], ["Genjutsu", ab.genjutsu], ["Taijutsu", ab.taijutsu], ["Kenjutsu", ab.kenjutsu], ["Senjutsu", ab.senjutsu], ["Dojutsu", ab.dojutsu], ["Kekkei Genkai", ab.kekkei], ["Summoning", ab.summoning]]
+    .map(([k, a]) => `<dt>${k}</dt><dd>${a && a.length ? esc(a.join(", ")) : NA}</dd>`).join("");
+  const bio = ["childhood", "academy", "genin", "chunin", "jonin", "events", "battles", "development"]
+    .filter((k) => x.bio && x.bio[k]).map((k) => `<h3>${{ childhood: "Childhood", academy: "Academy period", genin: "Genin period", chunin: "Chunin period", jonin: "Jonin period", events: "Major life events", battles: "Important battles", development: "Character development" }[k]}</h3><p>${esc(x.bio[k])}</p>`).join("") || `<p>${NA}</p>`;
+  const bioBlock = x.spoiler
+    ? `<div class="spoiler" id="sp"><strong>Spoiler warning.</strong> The biography below touches on major story events.<br><button class="btn ghost" id="show" type="button">Show biography</button></div><div id="bio" hidden>${bio}</div>`
+    : bio;
+  const jx = (x.jutsu || []).map((s) => link("jutsu", s)).join("");
+  return `<div class="detail-top">${avatar(x.name)}<div><h1>${esc(x.name)}</h1>${badges(x)}${x.role ? `<span class="pill">${esc(x.role)}</span>` : ""}
+      <p>${esc(x.summary)}</p>${fav}</div></div>
+    ${section("Basic information", kvRows([["Full name", esc(x.name)], ["First name", esc(x.first)], ["Nicknames", esc((x.nick || []).join(", "))], ["Gender", esc(x.gender)], ["Birthday", esc(x.birthday)],
+      ["Height / weight", ""], ["Blood type", ""], ["Occupation", esc(x.occupation)], ["Status", esc(x.status)]]))}
+    ${section("Ninja information", kvRows([["Village", v ? link("villages", x.village) : ""], ["Clan", cn ? link("clans", x.clan) : "Unaffiliated / not added"], ["Rank", esc(x.rank)], ["Team", t ? link("teams", x.team) : ""],
+      ["Organization", links("organizations", x.org)], ["Nature", esc((x.nature || []).join(", "))], ["Fighting style", esc(x.style)]]))}
+    ${section("Relationships", `<dl class="kv">${[["Father", rel.father], ["Mother", rel.mother], ["Siblings", rel.siblings], ["Spouse", rel.spouse], ["Children", rel.children], ["Friends", rel.friends], ["Rivals", rel.rivals], ["Teachers", rel.teachers], ["Students", rel.students]]
+      .map(([k, a]) => `<dt>${k}</dt><dd class="links">${people(a)}</dd>`).join("")}</dl>`)}
+    ${section("Abilities", `<dl class="kv">${abRows}</dl><h3>Known jutsu in the archive</h3><div class="links">${jx || NA}</div>`)}
+    ${section("Equipment and weapons", listOrNA(x.equip))}
+    ${section("Biography", bioBlock)}
+    ${section("Appearances", kvRows([["Series", esc((x.appears || []).join(", "))], ["Episodes / chapters", '<span class="tag">Exact numbers pending verification</span>'], ["Movies / OVAs", ""]]))}
+    ${section("Trivia", listOrNA(x.trivia))}
+    ${section("Related characters", `<div class="links">${people(x.related)}</div><p class="links"><a href="#/tree/${slug}">Family tree</a><a href="#/explorer/${slug}">Relationship explorer</a><a href="#/compare?a=${slug}">Compare</a></p>`)}`;
+}
+const badges = (x) => `<span class="pill sample">Sample entry · unverified</span>`;
+
 function detail(type, slug) {
   const x = bySlug(type, slug);
   if (!x) return notFound();
   pushRecent(type, slug);
   const crumbs = `<div class="crumbs"><a href="#/">Home</a> / <a href="#/${type}">${TITLES[type]}</a> / ${esc(x.name)}</div>`;
   const fav = `<button class="btn ghost" id="fav" type="button" aria-pressed="${isFav(type, slug)}">${isFav(type, slug) ? "★ Saved" : "☆ Save"}</button>`;
-  const rows = (pairs) => `<dl class="kv">${pairs.filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+  const memberChars = (pred) => characters.filter(pred).map((c) => link("characters", c.slug)).join("") || NA;
   let body = "";
-  if (type === "characters") {
-    const jx = (x.jutsu || []).map((s) => link("jutsu", s)).join("");
-    const bio = Object.entries(x.bio || {}).map(([k, v]) => `<h3>${esc(k[0].toUpperCase() + k.slice(1))}</h3><p>${esc(v)}</p>`).join("");
-    body = `<div class="detail-top">${avatar(x.name)}<div><h1>${esc(x.name)}</h1><span class="pill sample">Sample entry · unverified</span>${x.role ? `<span class="pill">${esc(x.role)}</span>` : ""}
-      ${rows([["First name", esc(x.first)], ["Rank", esc(x.rank)], ["Village", link("villages", x.village)], ["Clan", x.clan ? link("clans", x.clan) : ""], ["Team", x.team ? link("teams", x.team) : ""],
-        ["Organization", linkList("organizations", x.org)], ["Nature", esc((x.nature || []).join(", "))], ["Fighting style", esc(x.style)]])}${fav}</div></div>
-      <p>${esc(x.summary)}</p>
-      <h2>Jutsu</h2><div class="links">${jx || '<span class="tag">None in the sample dataset</span>'}</div>
-      <h2>Biography</h2>${x.spoiler ? `<div class="spoiler" id="sp"><strong>Spoiler warning.</strong> The biography below touches on major story events.<br><button class="btn ghost" id="show" type="button">Show biography</button></div><div id="bio" hidden>${bio}</div>` : bio}
-      <h2>Related characters</h2><div class="links">${linkList("characters", x.related)}</div>`;
-  } else if (type === "clans") {
-    const m = characters.filter((c) => c.clan === slug).map((c) => link("characters", c.slug)).join("");
-    body = `<h1>${esc(x.name)}</h1><span class="pill sample">Sample entry · unverified</span>${rows([["Village", x.village ? link("villages", x.village) : ""], ["Signature ability", esc(x.ability)], ["Kekkei Genkai", esc(x.kekkei)]])}<p>${esc(x.summary)}</p><h2>Members in the sample dataset</h2><div class="links">${m || '<span class="tag">None yet</span>'}</div>${fav}`;
+  if (type === "characters") body = characterBody(x, slug, fav);
+  else if (type === "clans") {
+    const v = x.village && bySlug("villages", x.village);
+    const fam = (x.members || []).map((s) => `<li>${link("characters", s)}${bySlug("characters", s)?.rank ? ` <span class="tag">${esc(bySlug("characters", s).rank)}</span>` : ""}</li>`).join("");
+    body = `<h1>${esc(x.name)}</h1>${badges(x)}<p>${esc(x.summary)}</p>${fav}
+      ${section("Overview", kvRows([["Origin", esc(x.origin)], ["Symbol", esc(x.symbol)], ["Headquarters / homeland", esc(x.homeland)], ["Special abilities", esc(x.ability)], ["Kekkei Genkai", esc(x.kekkei)], ["Related villages", v ? link("villages", x.village) : ""]]))}
+      ${section("Clan history", textOrNA(x.history))}
+      ${section("Famous members", fam ? `<ul class="plain">${fam}</ul>` : `<p>${NA}</p>`)}
+      ${section("Family tree", `<div class="links">${(x.members || []).filter((m) => bySlug("characters", m)).map((m) => `<a href="#/tree/${m}">${esc(bySlug("characters", m).name)}'s tree</a>`).join("") || NA}</div>`)}
+      ${section("Important events", listOrNA(x.events))}
+      ${section("Related organizations", links("organizations", x.orgs))}`;
   } else if (type === "villages") {
-    const m = characters.filter((c) => c.village === slug).map((c) => link("characters", c.slug)).join("");
-    const cl = clans.filter((c) => c.village === slug).map((c) => link("clans", c.slug)).join("");
-    body = `<h1>${esc(x.name)} <small lang="ja" style="color:var(--gold)">${esc(x.jp)}</small></h1><span class="pill sample">Sample entry · unverified</span>${rows([["Nation", esc(x.nation)], ["Leader title", esc(x.leader)], ["Current leader", esc(x.current)]])}<p>${esc(x.summary)}</p><h2>Famous shinobi</h2><div class="links">${m || '<span class="tag">None yet</span>'}</div><h2>Clans</h2><div class="links">${cl || '<span class="tag">None yet</span>'}</div>${fav}`;
-  } else if (type === "organizations" || type === "teams") {
-    const ms = (x.members || []).map((s) => link("characters", s)).join("");
-    body = `<h1>${esc(x.name)}</h1><span class="pill sample">Sample entry · unverified</span>${type === "teams" ? rows([["Sensei", x.sensei ? link("characters", x.sensei) : ""]]) : ""}<p>${esc(x.summary)}</p><h2>Members in the sample dataset</h2><div class="links">${ms || '<span class="tag">None yet</span>'}</div>${fav}`;
+    const cl = clans.filter((c) => c.village === slug).map((c) => link("clans", c.slug)).join("") || NA;
+    body = `<h1>${esc(x.name)} <small lang="ja" style="color:var(--gold)">${esc(x.jp)}</small></h1>${badges(x)}<p>${esc(x.summary)}</p>${fav}
+      ${section("Overview", kvRows([["Nation", esc(x.nation)], ["Location", esc(x.location)], ["Leader title", esc(x.leader)], ["Current leader", esc(x.current)], ["Previous leaders", esc((x.previous || []).join(", "))]]))}
+      ${section("Village history", textOrNA(x.history))}
+      ${section("Famous shinobi", `<div class="links">${memberChars((c) => c.village === slug)}</div>`)}
+      ${section("Clans", `<div class="links">${cl}</div>`)}
+      ${section("Military structure", textOrNA(x.military))}
+      ${section("Special techniques", textOrNA(x.special))}
+      ${section("Important events", listOrNA(x.events))}
+      ${section("Related story arcs", `<div class="links">${links("arcs", x.arcs)}</div>`)}`;
+  } else if (type === "organizations") {
+    body = `<h1>${esc(x.name)}</h1>${badges(x)}<p>${esc(x.summary)}</p>${fav}
+      ${section("Overview", kvRows([["Founders", esc((x.founders || []).join(", "))], ["Leaders", esc((x.leaders || []).join(", "))], ["Objectives", esc(x.objectives)], ["Structure", esc(x.structure)], ["Symbols", esc(x.symbol)]]))}
+      ${section("Members in the archive", `<div class="links">${people(x.members)}</div>`)}
+      ${section("Important missions", listOrNA(x.missions))}
+      ${section("Major battles", listOrNA(x.battles))}`;
+  } else if (type === "teams") {
+    body = `<h1>${esc(x.name)}</h1>${badges(x)}<p>${esc(x.summary)}</p>${fav}
+      ${section("Team", kvRows([["Sensei", x.sensei ? person(x.sensei) : ""], ["Formation", esc(x.formation)]]))}
+      ${section("Members", `<div class="links">${people(x.members)}</div>`)}
+      ${section("Missions", listOrNA(x.missions))}
+      ${section("Important battles", listOrNA(x.battles))}
+      ${section("Team history", '<p class="tag">Detailed team histories are pending verification.</p>')}`;
   } else if (type === "jutsu") {
-    body = `<h1>${esc(x.name)} <small lang="ja" style="color:var(--gold)">${esc(x.jp)}</small></h1><span class="pill sample">Sample entry · unverified</span><span class="pill">Official canon technique</span>${rows([["Category", esc(x.category)], ["Rank", esc(x.rank)], ["Nature", esc(x.nature)]])}<p>${esc(x.summary)}</p><h2>Known users</h2><div class="links">${linkList("characters", x.users)}</div>${fav}`;
+    body = `<h1>${esc(x.name)} <small lang="ja" style="color:var(--gold)">${esc(x.jp)}</small></h1>${badges(x)}<span class="pill">Official canon technique</span><p>${esc(x.summary)}</p>${fav}
+      ${section("Details", kvRows([["Category", esc(x.category)], ["Rank", esc(x.rank)], ["Nature", esc(x.nature)]]))}
+      ${section("Known users", `<div class="links">${people(x.users)}</div>`)}`;
+  } else if (type === "arcs") {
+    body = `<h1>${esc(x.name)}</h1>${badges(x)}<p>${esc(x.summary)}</p>${fav}
+      ${section("Overview", kvRows([["Anime series", esc(x.series)], ["Canon / filler", esc(x.canon)], ["Main antagonist", esc(x.antagonist)], ["Episode range", '<span class="tag">Pending verification</span>'], ["Manga chapters", '<span class="tag">Pending verification</span>']]))}
+      ${section("Main characters", `<div class="links">${people(x.chars)}</div>`)}
+      ${section("Villages involved", `<div class="links">${villages.filter((v) => (v.arcs || []).includes(slug)).map((v) => link("villages", v.slug)).join("") || NA}</div>`)}`;
+  } else if (type === "movies") {
+    body = `<h1>${esc(x.name)}</h1>${badges(x)}<p>${x.summary ? esc(x.summary) : '<span class="tag">Plot summary pending verification.</span>'}</p>${fav}
+      ${section("Overview", kvRows([["Series", esc(x.series)], ["Release year", esc(x.year)], ["Exact release date", '<span class="tag">Pending verification</span>'], ["Main antagonist", esc(x.antagonist)], ["Timeline placement", esc(x.timeline)], ["Canon status", '<span class="tag">Pending verification</span>']]))}
+      ${section("Main characters", `<div class="links">${people(x.chars)}</div>`)}
+      ${section("Poster", '<p class="tag">Official posters are copyrighted and not included.</p>')}`;
   } else {
-    body = `<h1>${esc(x.name)}</h1><span class="pill sample">Sample entry · unverified</span>${rows([["Series", esc(x.series)]])}<p>${esc(x.summary)}</p><p class="tag">Episode and chapter ranges are pending verification and intentionally not shown.</p>${fav}`;
+    body = `<h1>${esc(x.name)}</h1>${badges(x)}<p>${esc(x.summary)}</p>${fav}`;
   }
   main.innerHTML = `<div class="wrap detail">${crumbs}${body}</div>`;
   $("#fav").onclick = () => { toggleFav(type, slug); detail(type, slug); };
@@ -191,12 +260,47 @@ function saved() {
   const sec = (title, keys) => { const items = keys.map(fromKey).filter(Boolean); return `<h2>${title}</h2>${items.length ? `<div class="results">${items.map((i) => `<a class="row" href="${href(i.type, i.slug)}"><span>${esc(i.name)}</span><span class="tag">${esc(TYPE_LABEL[i.type])}</span></a>`).join("")}</div>` : '<p class="empty">Nothing here yet.</p>'}`; };
   main.innerHTML = `<div class="wrap detail"><h1>Saved</h1>${sec("Favorites", store.get("sa-fav", []))}${sec("Recently viewed", store.get("sa-recent", []))}<p class="tag">Stored in this browser only. Synced favorites arrive with accounts in Stage 5.</p></div>`;
 }
-const PLANNED = { episodes: ["Episodes", 3, "Per-episode pages for Naruto, Shippuden and Boruto need verified episode data. The schema (episodes, story_arcs) is ready; the dataset is not."], movies: ["Movies", 3, "Movie pages need verified release data. The schema (movies, movie_characters) is ready; the dataset is not."] };
-function planned(t) {
-  const [name, stage, why] = PLANNED[t];
-  main.innerHTML = `<div class="wrap detail"><h1>${name}</h1><div class="notice"><strong>Planned for Stage ${stage}.</strong> ${esc(why)} Rather than publish unchecked numbers, this section stays empty until it can be filled correctly.</div><a class="btn" href="#/">Back home</a></div>`;
+function episodesPage() {
+  main.innerHTML = `<div class="wrap detail"><h1>Episodes</h1><div class="notice"><strong>Per-episode pages are pending.</strong> They need a verified episode list (titles, air dates, arcs, filler status). The database tables are ready; the data is not. Totals below are approximate and unverified.</div>
+    <div class="grid">${seriesInfo.map((s) => `<div class="card nation"><h3>${esc(s.name)}</h3><span class="tag">${esc(s.note)}</span><p>About ${s.episodes} episodes</p></div>`).join("")}</div>
+    <h2 style="margin-top:2rem">Story arcs</h2><div class="grid">${arcs.map((a) => cardFor("arcs", a)).join("")}</div></div>`;
+}
+
+const sel = (id, label, opts, first) => `<label class="fld"><span>${label}</span><select id="${id}">${first ? `<option value="">${first}</option>` : ""}${opts.map((o) => (Array.isArray(o) ? `<option value="${esc(o[0])}">${esc(o[1])}</option>` : `<option value="${esc(o)}">${esc(o)}</option>`)).join("")}</select></label>`;
+function generatorPage() {
+  main.innerHTML = `<div class="wrap detail"><h1>Jutsu Name Generator</h1>
+    <div class="notice">Everything generated here is <strong>fan-created and not canon</strong>. Names are built from a small word bank and are never official Naruto techniques.</div>
+    <div class="formgrid">${sel("gEl", "Nature element", Object.keys(ELEMENTS))}${sel("gCat", "Category", Object.keys(CATEGORIES))}${sel("gTh", "Power theme", Object.keys(THEMES))}${sel("gSt", "Fighting style", Object.keys(STYLES))}${sel("gNm", "Naming style", Object.entries(NAMING))}</div>
+    <p><button class="btn" id="gen" type="button">Generate</button> <button class="btn ghost" id="rjBtn" type="button">Random canon jutsu</button></p>
+    <div id="out" aria-live="polite"></div></div>`;
+  const run = () => {
+    const r = generate({ element: $("#gEl").value, category: $("#gCat").value, theme: $("#gTh").value, style: $("#gSt").value, naming: $("#gNm").value });
+    $("#out").innerHTML = r ? `<div class="gen card"><div class="body"><span class="pill warn">Fan-created · not canon</span><h2>${esc(r.name)}</h2><p class="tag">${esc(r.english)}</p>
+      ${kvRows([["Category", esc(r.category)], ["Element", esc(r.element)], ["Rank", esc(r.rank)], ["Hand-sign theme", esc(r.signs) + ' <span class="tag">(suggestion only)</span>'], ["Fictional user", esc(r.user)]])}<p>${esc(r.description)}</p></div></div>` : '<p class="empty">Could not generate a unique name. Try again.</p>';
+  };
+  $("#gen").onclick = run; run();
+  $("#rjBtn").onclick = () => { const j = jutsu[Math.floor(Math.random() * jutsu.length)];
+    $("#out").innerHTML = `<div class="card"><div class="body"><span class="pill">Official canon technique</span><h2><a href="${href("jutsu", j.slug)}">${esc(j.name)}</a></h2><p>${esc(j.summary)}</p></div></div>`; };
+}
+
+function finderPage() {
+  const opt = (arr) => arr.map((x) => [x.slug, x.name]);
+  main.innerHTML = `<div class="wrap detail"><h1>Finder</h1><p class="tag">Look things up through the archive's links. Results cover only the sample dataset.</p>
+    <div class="formgrid">${sel("fChar", "Jutsu used by a character", opt(characters), "Choose a character")}${sel("fJut", "Users of a jutsu", opt(jutsu), "Choose a jutsu")}
+    ${sel("fClan", "Members of a clan", opt(clans), "Choose a clan")}${sel("fVil", "Members of a village", opt(villages), "Choose a village")}${sel("fOrg", "Members of an organization", opt(organizations), "Choose an organization")}</div>
+    <div id="fout" class="links"></div></div>`;
+  const show = (title, html) => { $("#fout").innerHTML = `<h2>${title}</h2>${html || NA}`; };
+  const reset = (keep) => ["fChar", "fJut", "fClan", "fVil", "fOrg"].forEach((i) => i !== keep && ($("#" + i).value = ""));
+  $("#fChar").onchange = (e) => { reset("fChar"); const c = bySlug("characters", e.target.value); c && show(`Jutsu used by ${esc(c.name)}`, (c.jutsu || []).map((s) => link("jutsu", s)).join("")); };
+  $("#fJut").onchange = (e) => { reset("fJut"); const j = bySlug("jutsu", e.target.value); j && show(`Users of ${esc(j.name)}`, people(j.users)); };
+  $("#fClan").onchange = (e) => { reset("fClan"); const c = bySlug("clans", e.target.value); c && show(`Members of ${esc(c.name)}`, people(c.members)); };
+  $("#fVil").onchange = (e) => { reset("fVil"); const v = bySlug("villages", e.target.value); v && show(`Shinobi of ${esc(v.name)}`, characters.filter((c) => c.village === v.slug).map((c) => link("characters", c.slug)).join("")); };
+  $("#fOrg").onchange = (e) => { reset("fOrg"); const o = bySlug("organizations", e.target.value); o && show(`Members of ${esc(o.name)}`, people(o.members)); };
 }
 function notFound() { main.innerHTML = `<div class="wrap detail"><h1>Page not found</h1><p>That page doesn't exist in the archive.</p><a class="btn" href="#/">Back home</a></div>`; }
+
+/* ---------- Stage 4 tools ---------- */
+const tools = initTools({ main, $, esc, href, link, person, people, avatar, section, kvRows, NA, store });
 
 /* ---------- router ---------- */
 function route() {
@@ -208,7 +312,15 @@ function route() {
   if (!parts.length) { home(); document.title = "SHINOBI ARCHIVE — Naruto Universe Encyclopedia (unofficial)"; }
   else if (parts[0] === "search") { searchPage(params); document.title = "Search · SHINOBI ARCHIVE"; }
   else if (parts[0] === "saved") { saved(); document.title = "Saved · SHINOBI ARCHIVE"; }
-  else if (PLANNED[parts[0]]) planned(parts[0]);
+  else if (parts[0] === "episodes") { episodesPage(); document.title = "Episodes · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "tools") { tools.toolsPage(); document.title = "Tools · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "tree") { tools.treePage(parts[1]); document.title = "Family tree · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "explorer") { tools.explorerPage(parts[1]); document.title = "Relationship explorer · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "compare") { tools.comparePage(params); document.title = "Compare · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "timeline") { tools.timelinePage(params); document.title = "Timeline · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "quiz") { tools.quizPage(); document.title = "Quiz · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "generator") { generatorPage(); document.title = "Jutsu Generator · SHINOBI ARCHIVE"; }
+  else if (parts[0] === "finder") { finderPage(); document.title = "Finder · SHINOBI ARCHIVE"; }
   else if (collections[parts[0]] && parts.length === 1) { listPage(parts[0]); document.title = `${TITLES[parts[0]]} · SHINOBI ARCHIVE`; }
   else if (collections[parts[0]] && parts.length === 2) { detail(parts[0], parts[1]); const x = bySlug(parts[0], parts[1]); document.title = `${x?.name || "Not found"} · SHINOBI ARCHIVE`; }
   else notFound();
