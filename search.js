@@ -2,7 +2,7 @@ import { collections } from "./data.js";
 
 export const TYPE_LABEL = {
   characters: "Character", clans: "Clan", villages: "Village", organizations: "Organization",
-  teams: "Team", jutsu: "Jutsu", arcs: "Story arc",
+  teams: "Team", jutsu: "Jutsu", arcs: "Story arc", movies: "Movie",
 };
 
 const norm = (s) => (s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
