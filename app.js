@@ -32,7 +32,8 @@ const fromKey = (k) => { const [t, s] = k.split("/"); const x = bySlug(t, s); re
 function charCard(c) {
   const v = bySlug("villages", c.village);
   const aff = [v?.name, c.team && bySlug("teams", c.team)?.name].filter(Boolean).join(" · ");
-  return `<a class="card" href="${href("characters", c.slug)}">${avatar(c.name)}<div class="body"><h3>${esc(c.name)}</h3><span class="tag">${esc(aff)}</span><p>${esc(c.summary)}</p></div></a>`;}
+  return `<a class="card" href="${href("characters", c.slug)}">${avatar(c.name)}<div class="body"><h3>${esc(c.name)}</h3><span class="tag">${esc(aff)}</span><p>${esc(c.summary)}</p></div></a>`;
+}
 const simpleCard = (type, x, extra = "") => `<a class="card" href="${href(type, x.slug)}"><div class="body"><h3>${esc(x.name)}</h3>${extra}<p>${esc(x.summary || "")}</p></div></a>`;
 const cardFor = (type, x) =>
   type === "characters" ? charCard(x)
