@@ -33,7 +33,7 @@ function score(item, words) {
 export function search(query, { types = null, sort = "relevance", limit = 50 } = {}) {
   const words = norm(query).split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-let out = INDEX.filter((i) => !types || types.includes(i.type))
+  let out = INDEX.filter((i) => !types || types.includes(i.type))
     .map((i) => ({ ...i, score: score(i, words) }))
     .filter((i) => i.score > 0);
   out.sort(sort === "name" ? (a, b) => a.name.localeCompare(b.name) : (a, b) => b.score - a.score || a.name.localeCompare(b.name));
